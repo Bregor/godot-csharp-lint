@@ -1,0 +1,11 @@
+# CSharpier skips .godot/, obj/ and bin/ on its own, but not addons/.
+#
+# Godot installs third-party plugins into addons/, and their C# sources compile
+# as part of your project - so `csharpier check .` reports them as unformatted
+# and `make lint` fails on code you did not write. Reformatting them instead
+# would leave a permanent diff against upstream that every plugin update
+# conflicts with.
+addons/
+
+# Uncomment for a plugin you actually maintain in-tree and want formatted:
+# !addons/my-own-plugin/

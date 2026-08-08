@@ -1,0 +1,60 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_size = 4
+
+# ---------------------------------------------------------------------------
+# Nullable reference types
+#
+# Directory.Build.props sets <Nullable>enable</Nullable>. Godot assigns node
+# references in _Ready() rather than in the constructor, so CS8618 fires on
+# essentially every node field - that noise is what this suppression removes.
+#
+# It is deliberately this one rule and not <Nullable>annotations</Nullable>:
+# "annotations" would disable the entire warning context, taking CS8602
+# (dereference of a possibly null reference) with it, and CS8602 is the rule
+# that catches the crashes.
+# ---------------------------------------------------------------------------
+
+dotnet_diagnostic.CS8618.severity = none
+
+# ---------------------------------------------------------------------------
+# Analyzer severities
+#
+# Everything below is pre-staged, commented out, for when AnalysisMode
+# is raised to "All" (see the note in Directory.Build.props). At that point
+# these rules start firing on ordinary Godot conventions rather than on real problems.
+# ---------------------------------------------------------------------------
+
+# Engine callbacks are named _Ready / _PhysicsProcess / _EnterTree. The
+# underscore is required by Godot, not a naming slip.
+# dotnet_diagnostic.CA1707.severity = none
+
+# [Export] on a field is the documented Godot idiom, and the inspector only
+# reads XML doc comments from fields, never from properties.
+# dotnet_diagnostic.CA1051.severity = none
+
+# Godot invokes node scripts through generated dispatch and scene-wired signal
+# connections, which unused-parameter analysis cannot see.
+# dotnet_diagnostic.CA1801.severity = none
+
+# CA1852 (seal internal types) is left ON: sealing Godot node scripts is safe,
+# because the engine never subclasses them. Uncomment only if you intend to
+# subclass your own node scripts.
+# dotnet_diagnostic.CA1852.severity = none
+
+# ---------------------------------------------------------------------------
+# Godot-authored files. Godot owns the exact bytes of these; trimming or
+# appending would produce spurious diffs and can corrupt them.
+# ---------------------------------------------------------------------------
+
+[*.{tscn,tres,godot,import}]
+trim_trailing_whitespace = false
+insert_final_newline = false

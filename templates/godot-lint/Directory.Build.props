@@ -1,0 +1,56 @@
+<Project>
+  <!--
+    Central analyzer configuration. Referenced automatically by every project
+    at or below this directory. This is the "one config" that aggregates your
+    linters, the way .golangci.yml aggregates linters for golangci-lint.
+  -->
+
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <!-- Recommended is a sane starting point. Bump to "All" once the codebase is clean. -->
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!--
+      "enable", with CS8618 silenced in .editorconfig instead.
+
+      Godot assigns node references in _Ready(), not in the constructor, so the
+      obvious workaround for that noise is <Nullable>annotations</Nullable>.
+      Don't: "annotations" turns off the whole warning context, not just the
+      constructor rule, so CS8602 ("dereference of a possibly null reference")
+      goes silent too - and that is the one that catches real null crashes.
+      Suppressing CS8618 alone kills the Godot noise and keeps the rest.
+    -->
+    <Nullable>enable</Nullable>
+
+    <!--
+      TreatWarningsAsErrors is intentionally NOT set here.
+      Local dev builds stay non-fatal; CI enforces via `dotnet build -warnaserror`
+      (see the Makefile / GitHub Actions workflow). This mirrors how golangci-lint
+      is a separate gate rather than part of every `go build`.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Run `dotnet list package` with the outdated flag to bump. -->
+    <PackageReference Include="Roslynator.Analyzers" Version="4.16.0" PrivateAssets="all" />
+
+    <!--
+      StyleCop.Analyzers deliberately NOT referenced. Its last stable (1.1.118,
+      2019) predates modern C#, and on a small Godot project it accounted for
+      roughly 90% of all warnings, over half of those a single rule (SA1101,
+      "prefix calls with this."). Its formatting rules also duplicate and fight
+      CSharpier, which already owns formatting. Roslynator plus the built-in CA
+      rules cover the substance without that tax.
+    -->
+
+    <!--
+      Meziantou is excellent but pin it yourself so the scaffold restores cleanly
+      out of the box regardless of the latest published version:
+        dotnet add package Meziantou.Analyzer
+      then move the generated reference here with PrivateAssets="all".
+    -->
+    <!-- <PackageReference Include="Meziantou.Analyzer" Version="X.Y.Z" PrivateAssets="all" /> -->
+  </ItemGroup>
+</Project>
