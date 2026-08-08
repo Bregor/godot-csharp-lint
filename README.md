@@ -58,10 +58,16 @@ All seven are project-agnostic. The `Makefile` discovers the solution itself - `
 
 ## Install
 
+Get the repository first - `dotnet new install` takes a NuGet package id, a folder, or a `.nupkg`, but not a git URL:
+
+```sh
+git clone https://github.com/Bregor/godot-csharp-lint.git
+```
+
 ### Option A: `dotnet new` template
 
 ```sh
-dotnet new install /path/to/godot-csharp-lint     # once per machine
+dotnet new install ./godot-csharp-lint            # once per machine
 cd /path/to/your/godot/project
 dotnet new godot-lint
 ```
@@ -81,7 +87,7 @@ the tag is for humans, since `dotnet new` has no idea git exists.
 ### Option B: script
 
 ```sh
-/path/to/godot-csharp-lint/install.sh /path/to/your/godot/project
+./godot-csharp-lint/install.sh /path/to/your/godot/project
 ```
 
 Existing files are skipped; pass `--force` to overwrite.
@@ -229,13 +235,22 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   The Roslynator CLI is still installed, but only for `dead-code`,
   which does something the analyzer package genuinely cannot.
 
-- **`.editorconfig` ships suppressions commented out.**
+- **`.editorconfig` ships most suppressions commented out.**
   `CA1707` (underscored engine callbacks) and `RCS1163`/`IDE0060` (parameters a signal signature forces you to accept)
   are pre-written for when you raise `AnalysisMode` to `All`.
-  `CA1050` (types outside a namespace) and `CA1051` (`[Export]` fields) do fire at `Recommended`,
-  but only on externally visible types and members -
-  so making your scripts `internal` clears them without a suppression, and is the fix worth taking.
-  On a real project that single change removed 14 findings.
+  `CA1051` (`[Export]` fields) fires at `Recommended` but only on public fields,
+  so making your scripts `internal` clears it without a suppression, and is the fix worth taking -
+  on a real project that single change removed 14 findings.
+
+- **`CA1050` and `RCS1110` are off; `CA1051` carries the visibility rule instead.**
+  Both namespace rules fire on correct Godot code - the engine's script template emits no namespace -
+  and what they ask for, wrapping scene scripts in one, is not what Godot does.
+  They are two lines rather than one because `CA1050` covers public types only
+  while `RCS1110` fires at any visibility, so `internal` does not clear it;
+  node scripts escape `RCS1110` for free, since the generators emit partial declarations
+  and the rule skips types with generated parts.
+  `CA1051` stays on and is meant to be suppressed case by case -
+  see [`[Export]` on a public script starts red](#export-on-a-public-script-starts-red).
 
 - **The bundle ships no `.gitignore`, and merges instead of copying.**
   Godot writes `.gitignore` itself when a project is created with Git version-control metadata:
@@ -275,6 +290,66 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   `*.tscn`, `*.tres`, `*.godot` and `*.import` get `trim_trailing_whitespace = false` and `insert_final_newline = false`,
   because Godot owns their exact bytes and editing them produces spurious diffs.
 
+## `[Export]` on a public script starts red
+
+This one is deliberate, so it is worth knowing before it happens rather than after.
+
+Godot's "new C# script" template emits a public class, and the documented way to expose a value is a public field:
+
+```csharp
+public partial class Player : Node
+{
+    [Export]
+    public float Speed = 1f;      // CA1051
+}
+```
+
+`CA1051` fires on that combination. It needs both halves to be externally visible, which makes it precise:
+
+| class | field | fires |
+| ---------- | ---------- | ------- |
+| `public` | `public` | `CA1051` |
+| `public` | `internal` | silent |
+| `internal` | `public` | silent |
+
+So a freshly created empty script stays quiet, and the rule speaks up the moment you add an exported field -
+which is the point at which the visibility question is worth asking.
+
+**The fix is `internal`, on either half.** `[Export]` works identically on internal members:
+
+```csharp
+internal sealed partial class Player : Node
+{
+    [Export]
+    internal float Speed = 1f;
+}
+```
+
+That also makes `CA1852` reportable and, at `AnalysisMode=All`, `CA1812` - see
+[the `internal` tip](#tip-internal-classes-private-members).
+
+For a field that really is public API - tuned from another assembly, exposed to mods -
+suppress it in place with the reason recorded:
+
+```csharp
+using System.Diagnostics.CodeAnalysis;
+
+[SuppressMessage(
+    "Design",
+    "CA1051:Do not declare visible instance fields",
+    Justification = "Tuned from another assembly at runtime."
+)]
+public float Speed = 1f;
+```
+
+`#pragma warning disable CA1051` around a region works too, and
+`GlobalSuppressions.cs` with `[assembly: SuppressMessage(..., Scope = "member", Target = "~F:Player.Speed")]`
+keeps the list in one place if you accumulate several -
+Rider and Visual Studio generate that form through *Suppress → in Suppression File*.
+All three were checked; there is no `// nolint`-style comment in C#, since Roslyn does not read comments.
+
+`CA1050` and `RCS1110`, which demand namespaces, are off - see [Design decisions](#design-decisions).
+
 ## Tip: `internal` classes, `private` members
 
 Not enforced by this bundle, but it multiplies its value.
@@ -308,9 +383,11 @@ Godot's own "new C# script" templates emit `public partial class X : Y` with no 
 so every freshly created script trips both until the class visibility changes.
 Marking the class `internal` clears them at the source instead of suppressing them -
 on a real project it removed 14 findings, and `[Export]` members keep working exactly as before.
-Note that `CA1050` is _not_ asking to be fixed by namespacing scene scripts:
-namespaces work fine in Godot, but they are a reasonable choice for shared utility code,
-not something to adopt because an analyzer asked.
+
+`CA1051` is left on for exactly that reason: it is the gate's way of noticing a script that stayed public,
+and it is meant to be silenced case by case rather than project-wide -
+see [`[Export]` on a public script starts red](#export-on-a-public-script-starts-red).
+`CA1050` is off, because what it asks for is a namespace, and that is not the Godot answer.
 
 Everything can be `internal` in Godot except `public override` engine callbacks (`_Ready`, `_PhysicsProcess`, …) - C# forbids an override from narrowing visibility.
 `[Export]` members, `[Signal]` delegates and node classes are all fine as `internal`.

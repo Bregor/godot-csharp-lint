@@ -61,45 +61,64 @@ dotnet_analyzer_diagnostic.category-roslynator.severity = warning
 # raised to "All" (see the note in Directory.Build.props). At that point these
 # rules start firing on ordinary Godot conventions rather than on real problems.
 #
-# CA1050 and CA1051 are the exceptions: both fire at Recommended already. Both
-# also apply only to *externally visible* types and members, so declaring your
-# script *classes* `internal` silences them without any suppression at all -
-# measured on a real project, that one change removed 14 findings. Only the
-# type's visibility matters here; marking individual members `internal` rather
-# than `public` changes nothing for any analyzer. See the "internal classes,
-# private members" section of the README. These two are here for the cases where
-# something genuinely has to stay public.
+# CA1050 and CA1051 are the exceptions: both fire at Recommended already, on
+# externally visible types and members only, so declaring your script *classes*
+# `internal` silences both without any suppression - measured on a real project,
+# that one change removed 14 findings. Only the type's visibility matters;
+# marking individual members `internal` rather than `public` changes nothing for
+# any analyzer. See the "internal classes, private members" section of the README.
+#
+# They are handled differently below. CA1050 is off, because what it asks for -
+# a namespace - is not what Godot does. CA1051 stays on: it is the gate's way of
+# noticing a script that is still public, and it is meant to be silenced case by
+# case rather than globally.
 # ---------------------------------------------------------------------------
 
 # Engine callbacks are named _Ready / _PhysicsProcess / _EnterTree. The
 # underscore is required by Godot, not a naming slip.
 # dotnet_diagnostic.CA1707.severity = none
 
-# Namespacing is NOT the expected fix here. Godot's own "new C# script"
-# templates emit `public partial class X : Y` with no namespace at all, so every
-# freshly created script trips this until its visibility changes. Namespaces do
-# work (the generators emit ScriptPathAttribute inside them correctly) and are
-# reasonable for shared utility code, but restructuring scene scripts to satisfy
-# an analyzer is the tail wagging the dog. Fires at Recommended, on public types
-# only - `internal` is the fix.
-# dotnet_diagnostic.CA1050.severity = none
-
-# RCS1110 is the same demand from Roslynator, and unlike CA1050 it is active by
-# default here, because the Roslynator category is promoted to warning above.
-# It is suppressed rather than pre-staged for that reason - left on, it fails
-# the gate for exactly the reason CA1050 above is not worth obeying.
+# Namespaces. CA1050 and RCS1110 ask for the same thing, and neither is worth
+# obeying here, so both are off.
 #
-# Worth knowing what it does and does not hit: node scripts are exempt for free,
-# because the source generators emit partial declarations for them and the rule
-# skips types with generated parts. It fires only on plain, non-Godot classes -
-# state machines, helpers, data types. That is also the code where a namespace
-# is a perfectly reasonable choice, so delete this line if you want the nudge.
+# Godot's "new C# script" templates emit `public partial class X : Y` with no
+# namespace, so a script trips these before it contains a line of your code, and
+# the answer they want - wrap scene scripts in a namespace - is not what Godot
+# does. Namespaces work fine (the generators emit ScriptPathAttribute inside
+# them correctly) and suit shared utility code; adopting them because an
+# analyzer asked is the tail wagging the dog.
+#
+# Two lines because they land on different code, so one does not cover the other:
+#
+#   CA1050  - public types only.
+#   RCS1110 - any visibility, so `internal` does not clear it. Node scripts are
+#             exempt for free: the generators emit partial declarations and the
+#             rule skips types with generated parts, which leaves plain helper
+#             classes.
+#
+# Visibility is still enforced, by CA1051 below - that rule stays on.
+dotnet_diagnostic.CA1050.severity = none
 dotnet_diagnostic.RCS1110.severity = none
 
-# [Export] on a field is the documented Godot idiom, and the inspector only
-# reads XML doc comments from fields, never from properties. Fires at
-# Recommended, on public fields only - internal [Export] fields are exported by
-# Godot exactly the same and never trigger it.
+# CA1051 is ON, and this suppression is left commented on purpose - it is the
+# one rule here meant to be silenced case by case rather than globally.
+#
+# It needs both halves to be externally visible, so it fires exactly on the
+# shape Godot's template steers you into:
+#
+#   public class + public field  -> CA1051
+#   public class + internal field -> silent
+#   internal class + public field -> silent
+#
+# Which means it stays quiet on a freshly created empty script and speaks up the
+# moment you add `[Export] public float Speed`. The fix is `internal` on either
+# half; [Export] works identically on internal members. For a field that really
+# is public API:
+#
+#   [SuppressMessage("Design", "CA1051:Do not declare visible instance fields",
+#       Justification = "Tuned from another assembly at runtime.")]
+#
+# Uncomment only to turn the convention off project-wide.
 # dotnet_diagnostic.CA1051.severity = none
 
 # Unused parameters. A signal handler's signature is dictated by the signal, and
