@@ -156,9 +156,72 @@ dotnet_diagnostic.RCS1110.severity = none
 # even if you keep the others commented out.
 dotnet_diagnostic.CA2007.severity = none
 
-# Same reasoning, for Meziantou.Analyzer's equivalent rule, if you enable that
-# package (see Directory.Build.props).
-# dotnet_diagnostic.MA0004.severity = none
+# Same reasoning, for Meziantou.Analyzer's equivalent rule.
+dotnet_diagnostic.MA0004.severity = none
+
+# CA1711 objects to type names ending in EventHandler. Godot requires exactly
+# that for signals, and not as a convention - the generator refuses to compile
+# without it:
+#
+#   error GD0201: The name of the delegate 'Bus.PingHandler' must end with
+#   'EventHandler'
+#
+# So the rule fires on code the engine will not accept any other way. It also
+# covers other reserved suffixes (Collection, Dictionary, Ex), which is the
+# small price for not annotating every [Signal] delegate in the project.
+dotnet_diagnostic.CA1711.severity = none
+
+# ---------------------------------------------------------------------------
+# Meziantou.Analyzer
+#
+# Complementary to Roslynator rather than an alternative: measured on a real
+# project, the two produced 12 and 20 findings with *zero* overlapping
+# locations. What each is for differs too - Roslynator does micro-refactoring
+# that `make fix` mostly applies by itself, Meziantou does correctness.
+#
+# Two of its rules have to go, or it undoes decisions made elsewhere in this
+# file and double-reports a third:
+# ---------------------------------------------------------------------------
+
+# MA0047 is the third copy of the namespace demand, after CA1050 and RCS1110
+# above. Same reasoning, same answer.
+dotnet_diagnostic.MA0047.severity = none
+
+# MA0038 is deprecated in favour of CA1822 - its own message says so - and CA1822
+# is already on. Measured on a real project they reported the same five members.
+dotnet_diagnostic.MA0038.severity = none
+
+# Left ON deliberately, because they are the reason to install the package:
+#
+#   MA0076 - implicit culture-sensitive ToString in an interpolated string.
+#            `$"{speed}"` on a float uses the current culture, so a machine with
+#            a comma decimal separator writes "1,5". Cosmetic on a HUD, a bug in
+#            a save file or a network packet. See the note below.
+#   MA0048 - file name must match type name. Style elsewhere, correctness here:
+#            Godot's generator emits ScriptPathAttribute only for the file whose
+#            name matches the type, so a mismatch leaves the class unregistered
+#            and unattachable, with no compiler error. Partial types split across
+#            files are the one false positive - Godot handles those by binding to
+#            the matching file.
+#
+# MA0076 objects to the culture being *implicit*, not to any particular culture,
+# so stating either one silences it for good - the choice stays yours. `make fix`
+# only rewrites the form that has not chosen yet, and it picks invariant, which
+# is right for a save file and arguable for a HUD. Measured:
+#
+#   $"{speed:F1}"                                          fires; fix rewrites
+#   string.Create(CultureInfo.CurrentCulture, $"...")      clean
+#   string.Create(CultureInfo.InvariantCulture, $"...")    clean
+#   $"{speed.ToString("F1", CultureInfo.CurrentCulture)}"  clean
+#   FormattableString.Invariant($"...")                    FALSE POSITIVE
+#
+# That last one is the trap. FormattableString.Invariant is the canonical
+# explicit-invariant form and the analyzer does not recognise it, so `make fix`
+# wraps it in string.Create and you end up applying invariant twice. If you use
+# it, suppress in place:
+#
+#   [SuppressMessage("Usage", "MA0076:Do not use implicit culture-sensitive ToString",
+#       Justification = "FormattableString.Invariant already fixes the culture.")]
 
 # ---------------------------------------------------------------------------
 # Third-party addons.

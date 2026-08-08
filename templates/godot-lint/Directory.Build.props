@@ -48,20 +48,12 @@
     <PackageReference Include="Roslynator.Analyzers" Version="4.16.0" PrivateAssets="all" />
 
     <!--
-      StyleCop.Analyzers deliberately NOT referenced. Its last stable (1.1.118,
-      2019) predates modern C#, and on a small Godot project it accounted for
-      roughly 90% of all warnings, over half of those a single rule (SA1101,
-      "prefix calls with this."). Its formatting rules also duplicate and fight
-      CSharpier, which already owns formatting. Roslynator plus the built-in CA
-      rules cover the substance without that tax.
+      Meziantou complements Roslynator rather than competing with it. Measured
+      on a real Godot project, the two reported 12 and 20 findings with zero
+      overlapping locations, and they are different in kind: Roslynator does
+      micro-refactoring that `make fix` mostly applies on its own, Meziantou
+      does correctness.
     -->
-
-    <!--
-      Meziantou is excellent but pin it yourself so the scaffold restores cleanly
-      out of the box regardless of the latest published version:
-        dotnet add package Meziantou.Analyzer
-      then move the generated reference here with PrivateAssets="all".
-    -->
-    <!-- <PackageReference Include="Meziantou.Analyzer" Version="X.Y.Z" PrivateAssets="all" /> -->
+    <PackageReference Include="Meziantou.Analyzer" Version="3.0.141" PrivateAssets="all" />
   </ItemGroup>
 </Project>

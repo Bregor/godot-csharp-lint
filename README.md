@@ -31,6 +31,11 @@ A Godot C# project fails in ways the compiler cannot see, and the obvious analyz
   Every RCS rule ships at `note` - below the threshold the gate enforces, and below what `dotnet format` repairs.
   Both are raised here.
 
+- **Two analyzer rules fire on code Godot demands.**
+  `CA1711` rejects the `EventHandler` suffix that `[Signal]` delegates cannot compile without,
+  and `CA2007` asks for `ConfigureAwait(false)`, which moves scene-tree access off the main thread.
+  Both are off; a stock analyzer setup has them on.
+
 - **Formatters corrupt Godot-authored files.**
   `.tscn`, `.tres`, `.import` and the `.uid` sidecars Godot 4.4+ writes are byte-owned by the engine.
 
@@ -200,6 +205,19 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   The other two are a subscription to an autoload with no unsubscribe anywhere -
   the autoload outlives the node and keeps holding the handler, with autoload names read from `project.godot` -
   and a lambda or `Callable.From` handler, which has no reference to hand back to `-=` at all.
+
+- **Meziantou is added alongside Roslynator, not instead of it.**
+  Measured on a real project, the two reported 12 and 20 findings with *zero* overlapping locations,
+  and they differ in kind: Roslynator does micro-refactoring that `make fix` mostly applies by itself,
+  Meziantou does correctness.
+  Two of its rules are switched off, or it would undo decisions made elsewhere:
+  `MA0047` is a third copy of the namespace demand after `CA1050` and `RCS1110`,
+  and `MA0038` is deprecated in favour of `CA1822` - on the same project they flagged the same five members.
+  What is left is `MA0076` and `MA0048`, seven findings, and both are worth having.
+
+- **`CA1711` is off, because Godot requires what it forbids.**
+  It objects to type names ending in `EventHandler`; Godot refuses to compile a `[Signal]` delegate without that suffix
+  (`error GD0201`). The rule fires on the only spelling the engine accepts.
 
 - **`<Nullable>enable</Nullable>`, with `CS8618` suppressed - not `annotations`.**
   Godot assigns node references in `_Ready()`, not in the constructor,
