@@ -2,17 +2,57 @@
 
 A drop-in linting and formatting bundle for Godot 4 C# projects. One command, one gate.
 
+## Why
+
+A Godot C# project fails in ways the compiler cannot see, and the obvious analyzer setup makes two of them worse.
+
+- **A renamed signal handler still compiles.** The connection lives in the `.tscn` as text,
+  so nothing catches it until the signal fires - possibly in a scene nobody opens before release.
+  `lint` reads the scene files.
+
+- **Subscribing in `_Ready` and unsubscribing in `_ExitTree` looks symmetric.**
+  `_Ready` runs once per node, `_ExitTree` on every removal,
+  so after a remove and re-add the handler is gone for good and the signal fires into nothing.
+  `lint` reports the mismatched pair, and the subscription to an autoload that is never undone.
+
+- **Only one of three configurations gets analyzed.**
+  Godot generates `Debug`, `ExportDebug` and `ExportRelease`, and a default `dotnet build` compiles the first.
+  Anything behind `#if !DEBUG` ships unanalyzed. `lint` builds `ExportRelease` too.
+
+- **`<Nullable>annotations</Nullable>` turns off the half that catches crashes.**
+  It is the natural answer to `CS8618` firing on every `_Ready`-assigned node reference,
+  and it takes `CS8602` with it. This bundle keeps `enable` and silences `CS8618` alone.
+
+- **Third-party addons fail your gate.**
+  `Godot.NET.Sdk` compiles every `.cs` under the project root, so plugin sources become your findings.
+  `addons/` is excluded from the formatter and the analyzers both.
+
+- **`Roslynator.Analyzers` does nothing at stock settings.**
+  Every RCS rule ships at `note` - below the threshold the gate enforces, and below what `dotnet format` repairs.
+  Both are raised here.
+
+- **Formatters corrupt Godot-authored files.**
+  `.tscn`, `.tres`, `.import` and the `.uid` sidecars Godot 4.4+ writes are byte-owned by the engine.
+
+What it deliberately does not do is find dead code inside node scripts.
+Godot's source generators emit a dispatch table naming every method and serialization code touching every field,
+so no member of a `Node` subclass is ever reportable as unused - by any analyzer, at any visibility.
+`make dead-code` says so plainly; it earns its keep on plain classes.
+
+Every claim above was checked against Godot 4.7.1 and a real project rather than reasoned about.
+The measurements are in [Design decisions](#design-decisions).
+
 ## What it installs
 
-| File                        | Role                                                                                                       |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `Directory.Build.props`     | Central analyzer config. Picked up automatically by every project at or below it.                          |
-| `.editorconfig`             | Formatting conventions, analyzer severities, and protection for Godot-authored files.                      |
-| `.csharpierignore`          | Keeps CSharpier out of `addons/`, where third-party plugin sources live.                                   |
-| `check-signals.sh`          | Verifies scene signal connections resolve to real methods. Run by `lint`.                                  |
-| `check-subscriptions.sh`    | Verifies `+=` signal subscriptions are undone in a matching lifecycle method. Run by `lint`.               |
+| File                        | Role                                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `Directory.Build.props`     | Central analyzer config. Picked up automatically by every project at or below it.                                                  |
+| `.editorconfig`             | Formatting conventions, analyzer severities, and protection for Godot-authored files.                                              |
+| `.csharpierignore`          | Keeps CSharpier out of `addons/`, where third-party plugin sources live.                                                           |
+| `check-signals.sh`          | Verifies scene signal connections resolve to real methods. Run by `lint`.                                                          |
+| `check-subscriptions.sh`    | Verifies `+=` signal subscriptions are undone in a matching lifecycle method. Run by `lint`.                                       |
 | `Makefile`                  | `restore` / `lint` / `fix` / `format` / `lint-sarif` / `check-signals` / `check-subscriptions` / `dead-code` / `ignore` / `clean`. |
-| `.config/dotnet-tools.json` | Pinned CSharpier and Roslynator CLI versions.                                                              |
+| `.config/dotnet-tools.json` | Pinned CSharpier and Roslynator CLI versions.                                                                                      |
 
 All seven are project-agnostic. The `Makefile` discovers the solution itself - `*.sln`, then `*.slnx`, then `*.csproj` - so nothing needs renaming per project.
 
@@ -47,18 +87,18 @@ make lint
 
 ## Targets
 
-| Target          | Does                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------- |
-| `restore`       | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                              |
-| `lint`          | The gate. Signal + subscription checks, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
-| `fix`           | `dotnet format style` → `analyzers` → `csharpier format`.                                      |
-| `format`        | CSharpier only.                                                                                |
-| `lint-sarif`    | Same build as `lint`, emitting `lint.sarif` instead of failing.                                |
-| `check-signals` | Scene signal connections that point at methods which do not exist.                             |
-| `check-subscriptions` | `+=` subscriptions that are never undone, or undone in the wrong lifecycle method.       |
-| `dead-code`     | Reports unreferenced public/internal symbols. Advisory - read the caveats.                     |
-| `ignore`        | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                   |
-| `clean`         | `dotnet clean`.                                                                                |
+| Target                | Does                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `restore`             | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                                              |
+| `lint`                | The gate. Signal + subscription checks, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
+| `fix`                 | `dotnet format style` → `analyzers` → `csharpier format`.                                                      |
+| `format`              | CSharpier only.                                                                                                |
+| `lint-sarif`          | Same build as `lint`, emitting `lint.sarif` instead of failing.                                                |
+| `check-signals`       | Scene signal connections that point at methods which do not exist.                                             |
+| `check-subscriptions` | `+=` subscriptions that are never undone, or undone in the wrong lifecycle method.                             |
+| `dead-code`           | Reports unreferenced public/internal symbols. Advisory - read the caveats.                                     |
+| `ignore`              | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                                   |
+| `clean`               | `dotnet clean`.                                                                                                |
 
 ### Variables
 
