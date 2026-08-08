@@ -66,6 +66,18 @@ cd /path/to/your/godot/project
 dotnet new godot-lint
 ```
 
+#### Packing
+
+```sh
+dotnet pack -c Release
+dotnet new install bin/Release/Bregor.Godot.CSharpLint.0.0.1.nupkg
+```
+
+Now `dotnet new uninstall` reports a version, `dotnet new update` works,
+and `dotnet new install Bregor.Godot.CSharpLint::0.0.1` pins one.
+Bump `PackageVersion` in `godot-csharp-lint.csproj` and tag the commit to match -
+the tag is for humans, since `dotnet new` has no idea git exists.
+
 ### Option B: script
 
 ```sh

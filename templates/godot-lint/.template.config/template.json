@@ -1,7 +1,7 @@
 {
   "$schema": "http://json.schemastore.org/template",
   "author": "Maxim Filatov",
-  "classifications": [ "Godot", "C#", "Lint", "Config" ],
+  "classifications": ["Godot", "C#", "Lint", "Config"],
   "identity": "Bregor.Godot.CSharpLint",
   "name": "Godot C# lint bundle",
   "shortName": "godot-lint",
@@ -15,7 +15,7 @@
     {
       "modifiers": [
         {
-          "exclude": [ ".template.config/**" ]
+          "exclude": [".template.config/**"]
         }
       ]
     }

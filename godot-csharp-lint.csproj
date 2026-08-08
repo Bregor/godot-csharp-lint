@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Packaging project for the template. Builds nothing - it exists only to turn
+    templates/ into a .nupkg, which is what gives the bundle a version.
+
+    A folder install (`dotnet new install /path/to/this/repo`) has no version at
+    all: the CLI records the path and reads the files live, so consumers get
+    whatever is in the working tree, and `dotnet new update` has nothing to act
+    on. Pack, and the version below becomes real:
+
+      dotnet pack -c Release
+      dotnet new install bin/Release/Bregor.Godot.CSharpLint.0.0.1.nupkg
+      dotnet new update
+
+    Bump PackageVersion, tag the commit to match, and pack. The tag is for
+    humans - `dotnet new` has no idea git exists - but the RepositoryUrl and
+    commit below are what tie a published package back to it.
+  -->
+
+  <PropertyGroup>
+    <PackageId>Bregor.Godot.CSharpLint</PackageId>
+    <PackageVersion>0.0.1</PackageVersion>
+    <Title>Godot C# lint bundle</Title>
+    <Authors>Maxim Filatov</Authors>
+    <Description>
+      Analyzer, formatter and Makefile bundle for Godot 4 C# projects. Adds
+      Directory.Build.props, .editorconfig, a Makefile, scene-signal checks and
+      a pinned dotnet tool manifest to an existing project.
+    </Description>
+    <PackageTags>dotnet-new;templates;godot;csharp;lint;analyzers</PackageTags>
+    <PackageProjectUrl>https://github.com/Bregor/godot-csharp-lint</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Bregor/godot-csharp-lint</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- What makes `dotnet new install` recognise this as templates. -->
+    <PackageType>Template</PackageType>
+
+    <!--
+      Templates ship as content, not as an assembly. A TargetFramework is still
+      required for the SDK to load, but nothing is compiled and no lib/ folder
+      is produced - hence NU5128, which is expected rather than suppressed noise.
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+
+    <!--
+      Without this the SDK would try to compile the .cs files this template
+      installs into other people's projects.
+    -->
+    <EnableDefaultItems>false</EnableDefaultItems>
+
+    <!--
+      NuGet excludes files whose *name* starts with a dot. Without this, packing
+      silently drops .editorconfig and .csharpierignore while keeping everything
+      else - directories like .config/ and .template.config/ are not affected,
+      so the package looks complete and is not.
+      A bundle without .editorconfig is worse than no bundle: Directory.Build.props
+      still sets <Nullable>enable</Nullable>, and the CS8618 suppression that
+      makes that usable in Godot lives in the file that went missing.
+    -->
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="templates\**\*" Exclude="templates\**\bin\**;templates\**\obj\**" />
+    <None Include="LICENSE.md" Pack="true" PackagePath="" />
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+</Project>
