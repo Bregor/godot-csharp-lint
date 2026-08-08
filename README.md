@@ -108,7 +108,7 @@ make lint
 | Target                | Does                                                                                                           |
 | --------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `restore`             | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                                              |
-| `lint`                | The gate. Signal + subscription checks, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
+| `lint`                | The gate. Signal + subscription checks, CSharpier check, a rebuild per configuration with `-warnaserror`. Every stage runs; fails at the end. |
 | `fix`                 | `dotnet format style` → `analyzers` → `csharpier format`.                                                      |
 | `format`              | CSharpier only.                                                                                                |
 | `lint-sarif`          | Same build as `lint`, emitting `lint.sarif` instead of failing.                                                |
@@ -154,6 +154,13 @@ It does not fail on findings, so run it alongside `make lint` rather than instea
 ## Design decisions
 
 These are the non-obvious ones, and the reasoning is repeated inline in each file so it survives being copied around.
+
+- **`lint` runs every stage before it fails.**
+  The scene and subscription checks are cheap and run first,
+  so making them prerequisites would mean one stale signal connection hides every analyzer finding in the project
+  until it is fixed - and you would fix things one round-trip at a time.
+  Each stage runs, each reports, and the exit code is decided at the end.
+  `golangci-lint` does not stop at its first linter either.
 
 - **`lint` checks scene signal connections, and it is the only check here that catches a crash.**
   A connection is plain text in the `.tscn`:

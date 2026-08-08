@@ -56,12 +56,31 @@ restore:
 	dotnet restore
 
 # The golangci-lint equivalent: one command, fails on any finding.
-lint: restore check-signals check-subscriptions
-	dotnet csharpier check .
-	@for cfg in $(LINT_CONFIGS); do \
+#
+# Every stage runs even when an earlier one fails, and the exit code is decided
+# at the end. That matters here: the scene and subscription checks are cheap and
+# run first, so making them prerequisites would mean one stale signal connection
+# hides every analyzer finding in the project until it is fixed. golangci-lint
+# does not stop at its first linter either.
+#
+# The stages are independent, so this costs nothing but the time of the run you
+# were going to make anyway.
+lint: restore
+	@fail=0; \
+	sh ./check-signals.sh . || fail=1; \
+	echo; \
+	sh ./check-subscriptions.sh . || fail=1; \
+	echo; \
+	dotnet csharpier check . || fail=1; \
+	for cfg in $(LINT_CONFIGS); do \
 		echo "==> dotnet build -c $$cfg -warnaserror"; \
-		dotnet build --no-incremental -warnaserror -c "$$cfg" $(ANALYSIS_ARG) || exit 1; \
-	done
+		dotnet build --no-incremental -warnaserror -c "$$cfg" $(ANALYSIS_ARG) || fail=1; \
+	done; \
+	if [ "$$fail" -ne 0 ]; then \
+		echo; \
+		echo "lint failed - see the findings above."; \
+	fi; \
+	exit $$fail
 
 # Auto-fix everything that can be fixed automatically.
 #
