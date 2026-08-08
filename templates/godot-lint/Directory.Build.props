@@ -7,6 +7,17 @@
 
   <PropertyGroup>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
+
+    <!--
+      "latest" tracks whichever SDK is installed, so the rule set - and with it
+      the set of findings - changes when the SDK does. That is fine while the
+      team is on one SDK and turns into "passes on my machine, fails in CI" when
+      it is not. Pin to a number here (e.g. 9.0) when that starts to matter;
+      this is the right file for it, because the Godot editor's own builds read
+      it too and never see the Makefile.
+
+      To try a level before committing to it: make lint ANALYSIS_LEVEL=9.0
+    -->
     <AnalysisLevel>latest</AnalysisLevel>
     <!-- Recommended is a sane starting point. Bump to "All" once the codebase is clean. -->
     <AnalysisMode>Recommended</AnalysisMode>
@@ -26,9 +37,9 @@
 
     <!--
       TreatWarningsAsErrors is intentionally NOT set here.
-      Local dev builds stay non-fatal; CI enforces via `dotnet build -warnaserror`
-      (see the Makefile / GitHub Actions workflow). This mirrors how golangci-lint
-      is a separate gate rather than part of every `go build`.
+      Local dev builds stay non-fatal; the `lint` target enforces via
+      `dotnet build -warnaserror` (see the Makefile). This mirrors how
+      golangci-lint is a separate gate rather than part of every `go build`.
     -->
   </PropertyGroup>
 

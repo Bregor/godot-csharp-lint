@@ -26,35 +26,161 @@ indent_size = 4
 dotnet_diagnostic.CS8618.severity = none
 
 # ---------------------------------------------------------------------------
+# Roslynator
+#
+# Every RCS rule ships at `note`, which is below the warning threshold the gate
+# enforces - so without this line Roslynator.Analyzers never fails `make lint`
+# and only ever contributes through `make fix`. Promoting the category is what
+# makes it part of the gate.
+#
+# Measured on a small real Godot project (9 scripts, ~700 lines) before adding
+# this line, to size the cost honestly:
+#
+#   at `note`      8 findings / 3 rules   -> 4 remain after `make fix`
+#   at `warning`   7 findings / 3 rules   -> 4 remain after `make fix`
+#
+# The counts barely move because `make fix` already applies RCS fixes at
+# --severity info; promotion changes what *blocks*, not what gets cleaned up.
+# Note that promoting a category also enables rules that ship disabled - two of
+# them appeared on that project, both auto-fixable.
+#
+# The 4 survivors were all RCS1163 (unused parameter), which has no Fix All and
+# was a genuine bug: four methods took a `bool` they never read. That is the
+# case for turning this on - it is the findings without mechanical fixes that
+# are worth a gate.
+#
+# Comment this out if you would rather Roslynator stayed advisory.
+# ---------------------------------------------------------------------------
+
+dotnet_analyzer_diagnostic.category-roslynator.severity = warning
+
+# ---------------------------------------------------------------------------
 # Analyzer severities
 #
-# Everything below is pre-staged, commented out, for when AnalysisMode
-# is raised to "All" (see the note in Directory.Build.props). At that point
-# these rules start firing on ordinary Godot conventions rather than on real problems.
+# Most of what follows is pre-staged, commented out, for when AnalysisMode is
+# raised to "All" (see the note in Directory.Build.props). At that point these
+# rules start firing on ordinary Godot conventions rather than on real problems.
+#
+# CA1050 and CA1051 are the exceptions: both fire at Recommended already. Both
+# also apply only to *externally visible* types and members, so declaring your
+# script *classes* `internal` silences them without any suppression at all -
+# measured on a real project, that one change removed 14 findings. Only the
+# type's visibility matters here; marking individual members `internal` rather
+# than `public` changes nothing for any analyzer. See the "internal classes,
+# private members" section of the README. These two are here for the cases where
+# something genuinely has to stay public.
 # ---------------------------------------------------------------------------
 
 # Engine callbacks are named _Ready / _PhysicsProcess / _EnterTree. The
 # underscore is required by Godot, not a naming slip.
 # dotnet_diagnostic.CA1707.severity = none
 
+# Namespacing is NOT the expected fix here. Godot's own "new C# script"
+# templates emit `public partial class X : Y` with no namespace at all, so every
+# freshly created script trips this until its visibility changes. Namespaces do
+# work (the generators emit ScriptPathAttribute inside them correctly) and are
+# reasonable for shared utility code, but restructuring scene scripts to satisfy
+# an analyzer is the tail wagging the dog. Fires at Recommended, on public types
+# only - `internal` is the fix.
+# dotnet_diagnostic.CA1050.severity = none
+
+# RCS1110 is the same demand from Roslynator, and unlike CA1050 it is active by
+# default here, because the Roslynator category is promoted to warning above.
+# It is suppressed rather than pre-staged for that reason - left on, it fails
+# the gate for exactly the reason CA1050 above is not worth obeying.
+#
+# Worth knowing what it does and does not hit: node scripts are exempt for free,
+# because the source generators emit partial declarations for them and the rule
+# skips types with generated parts. It fires only on plain, non-Godot classes -
+# state machines, helpers, data types. That is also the code where a namespace
+# is a perfectly reasonable choice, so delete this line if you want the nudge.
+dotnet_diagnostic.RCS1110.severity = none
+
 # [Export] on a field is the documented Godot idiom, and the inspector only
-# reads XML doc comments from fields, never from properties.
+# reads XML doc comments from fields, never from properties. Fires at
+# Recommended, on public fields only - internal [Export] fields are exported by
+# Godot exactly the same and never trigger it.
 # dotnet_diagnostic.CA1051.severity = none
 
-# Godot invokes node scripts through generated dispatch and scene-wired signal
-# connections, which unused-parameter analysis cannot see.
-# dotnet_diagnostic.CA1801.severity = none
+# Unused parameters. A signal handler's signature is dictated by the signal, and
+# Godot's generated dispatch checks the argument count exactly, so a parameter
+# you do not read cannot simply be deleted - `OnBodyEntered(Node3D body)` has to
+# keep taking a body. These two are the live rules for that; RCS1163 fires by
+# default here because the Roslynator category is promoted above.
+#
+# Do not reach for CA1801: it is a legacy FxCop id that was never ported to the
+# Roslyn analyzers and does not fire even when set to warning explicitly. The
+# SDK silently ignores unknown ids, so configuring it looks like it works.
+# dotnet_diagnostic.RCS1163.severity = none
+# dotnet_diagnostic.IDE0060.severity = none
 
 # CA1852 (seal internal types) is left ON: sealing Godot node scripts is safe,
 # because the engine never subclasses them. Uncomment only if you intend to
 # subclass your own node scripts.
 # dotnet_diagnostic.CA1852.severity = none
 
+# CA1812 (avoid uninstantiated internal classes) is the one to uncomment first
+# if you raise AnalysisMode to All. Godot instantiates node scripts from the
+# scene tree, never with `new`, so the analyzer sees zero constructions and
+# flags every single script in the project. It is triggered precisely by taking
+# this bundle's own advice to make script classes internal, so the two would
+# otherwise contradict each other.
+# dotnet_diagnostic.CA1812.severity = none
+
+# CA2007 is the one on this list you should not merely silence but actively
+# distrust: unlike the rest, following its advice introduces bugs.
+#
+# GodotSharp installs a GodotSynchronizationContext, which is what makes an
+# `await` resume on the main loop. ConfigureAwait(false) opts out of exactly
+# that, so the continuation resumes on a thread-pool thread and every scene
+# tree touch after the await becomes a race. Leave this suppression in place
+# even if you keep the others commented out.
+dotnet_diagnostic.CA2007.severity = none
+
+# Same reasoning, for Meziantou.Analyzer's equivalent rule, if you enable that
+# package (see Directory.Build.props).
+# dotnet_diagnostic.MA0004.severity = none
+
+# ---------------------------------------------------------------------------
+# Third-party addons.
+#
+# Godot installs plugins into addons/, and Godot.NET.Sdk compiles every .cs
+# under the project root - so plugin sources are part of your compilation and
+# their findings fail your gate. .csharpierignore keeps the formatter out;
+# this keeps the analyzers out.
+#
+# `generated_code = true` rather than `dotnet_analyzer_diagnostic.severity`:
+# the bulk-severity option is outranked by the per-rule entries the SDK emits
+# for AnalysisMode, so it has no effect here. This does work, and it means
+# "code this repo did not author" - which is what addons/ is.
+#
+# Caveat: this covers analyzer rules (CA/RCS/IDE) but NOT compiler warnings,
+# which have to be listed individually. CS0414 is pre-listed because vendored
+# code hits it constantly; add others as you meet them.
+# ---------------------------------------------------------------------------
+
+[addons/**.cs]
+generated_code = true
+dotnet_diagnostic.CS0414.severity = none
+
 # ---------------------------------------------------------------------------
 # Godot-authored files. Godot owns the exact bytes of these; trimming or
 # appending would produce spurious diffs and can corrupt them.
+#
+# .uid covers the sidecars Godot 4.4+ writes next to scripts and resources
+# (Player.cs.uid); harmless to list on older versions, which just never
+# generate them.
 # ---------------------------------------------------------------------------
 
-[*.{tscn,tres,godot,import}]
+[*.{tscn,tres,godot,import,uid}]
 trim_trailing_whitespace = false
 insert_final_newline = false
+
+# ---------------------------------------------------------------------------
+# GDScript. The [*] block above sets spaces, but Godot's own style guide and
+# its editor both use tabs, so without this an editor honouring .editorconfig
+# fights the Godot editor over every .gd file in a mixed-language project.
+# ---------------------------------------------------------------------------
+
+[*.{gd,gdshader,gdshaderinc}]
+indent_style = tab

@@ -6,6 +6,11 @@
       "version": "1.3.0",
       "commands": ["csharpier"],
       "rollForward": false
+    },
+    "roslynator.dotnet.cli": {
+      "version": "0.13.0",
+      "commands": ["roslynator"],
+      "rollForward": false
     }
   }
 }
