@@ -4,15 +4,16 @@ A drop-in linting and formatting bundle for Godot 4 C# projects. One command, on
 
 ## What it installs
 
-| File                        | Role                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `Directory.Build.props`     | Central analyzer config. Picked up automatically by every project at or below it.     |
-| `.editorconfig`             | Formatting conventions, analyzer severities, and protection for Godot-authored files. |
-| `.csharpierignore`          | Keeps CSharpier out of `addons/`, where third-party plugin sources live.              |
-| `Makefile`                  | `restore` / `lint` / `fix` / `format` / `lint-sarif` / `dead-code` / `ignore` / `clean`. |
-| `.config/dotnet-tools.json` | Pinned CSharpier and Roslynator CLI versions.                                         |
+| File                        | Role                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Directory.Build.props`     | Central analyzer config. Picked up automatically by every project at or below it.                          |
+| `.editorconfig`             | Formatting conventions, analyzer severities, and protection for Godot-authored files.                      |
+| `.csharpierignore`          | Keeps CSharpier out of `addons/`, where third-party plugin sources live.                                   |
+| `check-signals.sh`          | Verifies scene signal connections resolve to real methods. Run by `lint`.                                  |
+| `Makefile`                  | `restore` / `lint` / `fix` / `format` / `lint-sarif` / `check-signals` / `dead-code` / `ignore` / `clean`. |
+| `.config/dotnet-tools.json` | Pinned CSharpier and Roslynator CLI versions.                                                              |
 
-All five are project-agnostic. The `Makefile` discovers the solution itself - `*.sln`, then `*.slnx`, then `*.csproj` - so nothing needs renaming per project.
+All six are project-agnostic. The `Makefile` discovers the solution itself - `*.sln`, then `*.slnx`, then `*.csproj` - so nothing needs renaming per project.
 
 ## Install
 
@@ -45,24 +46,25 @@ make lint
 
 ## Targets
 
-| Target       | Does                                                                             |
-| ------------ | -------------------------------------------------------------------------------- |
-| `restore`    | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                |
-| `lint`       | The gate. CSharpier check, then a rebuild per configuration with `-warnaserror`. |
-| `fix`        | `dotnet format style` → `analyzers` → `csharpier format`.                        |
-| `format`     | CSharpier only.                                                                  |
-| `lint-sarif` | Same build as `lint`, emitting `lint.sarif` instead of failing.                  |
-| `dead-code`  | Reports unreferenced public/internal symbols. Advisory - read the caveats.       |
-| `ignore`     | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                     |
-| `clean`      | `dotnet clean`.                                                                  |
+| Target          | Does                                                                                           |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `restore`       | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                              |
+| `lint`          | The gate. Signal check, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
+| `fix`           | `dotnet format style` → `analyzers` → `csharpier format`.                                      |
+| `format`        | CSharpier only.                                                                                |
+| `lint-sarif`    | Same build as `lint`, emitting `lint.sarif` instead of failing.                                |
+| `check-signals` | Scene signal connections that point at methods which do not exist.                             |
+| `dead-code`     | Reports unreferenced public/internal symbols. Advisory - read the caveats.                     |
+| `ignore`        | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                   |
+| `clean`         | `dotnet clean`.                                                                                |
 
 ### Variables
 
-| Variable         | Default             | Effect                                                          |
-| ---------------- | ------------------- | --------------------------------------------------------------- |
-| `SEVERITY`       | `info`              | How deep `fix` goes. `info`, `warn` or `error`.                 |
-| `LINT_CONFIGS`   | `Debug ExportRelease` | Configurations `lint` builds.                                 |
-| `ANALYSIS_LEVEL` | *(unset)*           | Overrides `AnalysisLevel` for one run. Unset means use the props. |
+| Variable         | Default               | Effect                                                            |
+| ---------------- | --------------------- | ----------------------------------------------------------------- |
+| `SEVERITY`       | `info`                | How deep `fix` goes. `info`, `warn` or `error`.                   |
+| `LINT_CONFIGS`   | `Debug ExportRelease` | Configurations `lint` builds.                                     |
+| `ANALYSIS_LEVEL` | _(unset)_             | Overrides `AnalysisLevel` for one run. Unset means use the props. |
 
 ```sh
 make fix SEVERITY=warn        # only what `make lint` would actually reject
@@ -93,6 +95,24 @@ It does not fail on findings, so run it alongside `make lint` rather than instea
 
 These are the non-obvious ones, and the reasoning is repeated inline in each file so it survives being copied around.
 
+- **`lint` checks scene signal connections, and it is the only check here that catches a crash.**
+  A connection is plain text in the `.tscn`:
+  `[connection signal="pressed" from="Button" to="." method="OnPressed"]`.
+  Rename `OnPressed` and the project still compiles, every analyzer stays quiet,
+  and the game breaks the next time that signal fires -
+  possibly in a scene nobody opens until release.
+  Roslyn cannot read scene files, so nothing else in this bundle can see it.
+  `check-signals.sh` is a grep, not a parser: it verifies the method exists _somewhere_ in the project,
+  not that it exists on the class attached to the target node.
+  Resolving `to="../Foo/Bar"` would mean walking the node tree and the `ext_resource` table;
+  the loose check already catches the case that actually happens - a handler renamed while the connection stayed behind.
+  It needs no build, so it runs first in `lint`, where it costs nothing.
+  A connection targeting a built-in engine method (`queue_free`) has no C# declaration to find;
+  list those in `.signalignore`.
+  That list stays project-local on purpose -
+  a dictionary of Godot's own methods would need re-syncing with every engine release
+  to handle something that comes up once or twice per project.
+
 - **`<Nullable>enable</Nullable>`, with `CS8618` suppressed - not `annotations`.**
   Godot assigns node references in `_Ready()`, not in the constructor,
   so full nullable analysis reports `CS8618` on essentially every such field.
@@ -115,7 +135,7 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   Measured on a small real Godot project before switching it on: 8 findings at `note`, 7 at `warning`,
   4 surviving `make fix` either way - the counts barely move,
   because `fix` already applies RCS fixes at `--severity info`.
-  Promotion changes what *blocks*, not what gets cleaned up.
+  Promotion changes what _blocks_, not what gets cleaned up.
   All 4 survivors were `RCS1163` (unused parameter), which has no Fix All, and all 4 were a real bug.
 
 - **`fix` defaults to `--severity info`; `lint` still gates at warning.**
@@ -185,35 +205,35 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
 Not enforced by this bundle, but it multiplies its value.
 The two halves do different jobs, and it is worth knowing which is which before churning code:
 
-| Change | What it actually buys |
-| ------------------------------- | ------------------------------------------------------------------ |
-| class `public` → `internal`     | silences `CA1050` and `CA1051`; makes `CA1852` (seal) reportable, and `CA1812` at `AnalysisMode=All` |
-| member `public` → `private`     | makes unused-member analysis possible (`RCS1213`, `CS0414`, `RCS1169`) |
-| member `public` → `internal`    | **nothing** - measured, not assumed                                 |
+| Change                       | What it actually buys                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- |
+| class `public` → `internal`  | silences `CA1050` and `CA1051`; makes `CA1852` (seal) reportable, and `CA1812` at `AnalysisMode=All` |
+| member `public` → `private`  | makes unused-member analysis possible (`RCS1213`, `CS0414`, `RCS1169`)                               |
+| member `public` → `internal` | **nothing** - measured, not assumed                                                                  |
 
-The tempting theory is that `internal` lets the compiler see every call site, so uncalled *members* become reportable.
+The tempting theory is that `internal` lets the compiler see every call site, so uncalled _members_ become reportable.
 It is true in principle and false in practice: no analyzer reports an uncalled `internal` member, at any `AnalysisMode`.
 The visibility-sensitive rules that do exist are all type-level - `CA1852`, and `CA1812` at `All`.
 
-Nor does it help `make dead-code`, the one thing that *can* find unused public code:
+Nor does it help `make dead-code`, the one thing that _can_ find unused public code:
 its `--visibility` option filters which symbols get reported, it is not a capability gate,
 so `public`, `internal` and `private` members are all found equally.
 Marking members `internal` is fine as intent-documentation - it just is not worth a refactor,
 because nothing rewards it.
 
-Only the *type's* visibility matters for `CA1050`/`CA1051`/`CA1852`,
-and only the *member's* `private`-ness matters for dead-code analysis.
+Only the _type's_ visibility matters for `CA1050`/`CA1051`/`CA1852`,
+and only the _member's_ `private`-ness matters for dead-code analysis.
 An `internal` member is treated exactly like a `public` one there:
 in an `internal sealed class`, an uncalled `public` method, an uncalled `internal` method and an uncalled `private` method
 produce nothing, nothing, and three findings respectively.
-So marking every member `internal` is churn without a payoff - mark the *class* `internal` and leave members alone unless they can be `private`.
+So marking every member `internal` is churn without a payoff - mark the _class_ `internal` and leave members alone unless they can be `private`.
 
 `CA1050` and `CA1051` both fire at `AnalysisMode=Recommended`, and both apply only to externally visible members.
 Godot's own "new C# script" templates emit `public partial class X : Y` with no namespace,
 so every freshly created script trips both until the class visibility changes.
 Marking the class `internal` clears them at the source instead of suppressing them -
 on a real project it removed 14 findings, and `[Export]` members keep working exactly as before.
-Note that `CA1050` is *not* asking to be fixed by namespacing scene scripts:
+Note that `CA1050` is _not_ asking to be fixed by namespacing scene scripts:
 namespaces work fine in Godot, but they are a reasonable choice for shared utility code,
 not something to adopt because an analyzer asked.
 
@@ -235,7 +255,7 @@ The tip pays off on plain classes; on node scripts, only the non-generated findi
 - Godot 4.x with the Mono/.NET build
 - `make`
 - A generated C# project. Godot writes the `.csproj` and `.sln` only after the project
-  contains at least one C# script *and* you press Build (or Run) in the editor -
+  contains at least one C# script _and_ you press Build (or Run) in the editor -
   opening the project does not do it. `fix` falls back to the `.csproj` if the solution
   is missing, but neither exists before that first build.
 

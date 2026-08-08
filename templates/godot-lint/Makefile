@@ -1,4 +1,4 @@
-.PHONY: restore lint format fix lint-sarif dead-code ignore clean
+.PHONY: restore lint format fix lint-sarif check-signals dead-code ignore clean
 
 # Godot generates both <Name>.csproj and <Name>.sln at the project root, which
 # makes `dotnet format` ambiguous, so it has to be told which one to use.
@@ -56,7 +56,7 @@ restore:
 	dotnet restore
 
 # The golangci-lint equivalent: one command, fails on any finding.
-lint: restore
+lint: restore check-signals
 	dotnet csharpier check .
 	@for cfg in $(LINT_CONFIGS); do \
 		echo "==> dotnet build -c $$cfg -warnaserror"; \
@@ -95,6 +95,17 @@ format: restore
 # No -warnaserror here: the point is to produce the report, not to fail.
 lint-sarif: restore
 	dotnet build --no-incremental -p:ErrorLog=lint.sarif%2Cversion=2.1 $(ANALYSIS_ARG)
+
+# Check that signal connections wired in scenes still resolve to real methods.
+#
+# Part of `lint` rather than optional, because unlike everything else here it
+# catches a runtime crash rather than a style problem: rename a handler and the
+# build stays green while the game breaks the next time that signal fires.
+#
+# Needs no build and no restore - it reads .tscn and .cs as text - so it runs
+# first, where it costs nothing.
+check-signals:
+	@sh ./check-signals.sh .
 
 # Report code nothing references, including public and internal members.
 #
