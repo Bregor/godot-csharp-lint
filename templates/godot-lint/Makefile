@@ -1,4 +1,4 @@
-.PHONY: restore lint format fix lint-sarif check-signals dead-code ignore clean
+.PHONY: restore lint format fix lint-sarif check-signals check-subscriptions dead-code ignore clean
 
 # Godot generates both <Name>.csproj and <Name>.sln at the project root, which
 # makes `dotnet format` ambiguous, so it has to be told which one to use.
@@ -56,7 +56,7 @@ restore:
 	dotnet restore
 
 # The golangci-lint equivalent: one command, fails on any finding.
-lint: restore check-signals
+lint: restore check-signals check-subscriptions
 	dotnet csharpier check .
 	@for cfg in $(LINT_CONFIGS); do \
 		echo "==> dotnet build -c $$cfg -warnaserror"; \
@@ -106,6 +106,20 @@ lint-sarif: restore
 # first, where it costs nothing.
 check-signals:
 	@sh ./check-signals.sh .
+
+# Check that signal subscriptions are undone in a matching lifecycle method.
+#
+# Also a runtime-only failure, and also invisible to every analyzer, so it sits
+# next to check-signals in the gate rather than being optional. Reads .cs and
+# project.godot as text, needs no build.
+#
+# The rule that earns its keep is not `+= must have -=`: subscribing to a child
+# node needs no unsubscribe, because the child is freed with its parent, and
+# flagging those would bury the real findings. What is reported is a mismatched
+# lifecycle pair, a subscription to an autoload that outlives you, and a lambda
+# that cannot be handed back to -= at all.
+check-subscriptions:
+	@sh ./check-subscriptions.sh .
 
 # Report code nothing references, including public and internal members.
 #

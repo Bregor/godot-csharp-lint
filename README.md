@@ -10,10 +10,11 @@ A drop-in linting and formatting bundle for Godot 4 C# projects. One command, on
 | `.editorconfig`             | Formatting conventions, analyzer severities, and protection for Godot-authored files.                      |
 | `.csharpierignore`          | Keeps CSharpier out of `addons/`, where third-party plugin sources live.                                   |
 | `check-signals.sh`          | Verifies scene signal connections resolve to real methods. Run by `lint`.                                  |
-| `Makefile`                  | `restore` / `lint` / `fix` / `format` / `lint-sarif` / `check-signals` / `dead-code` / `ignore` / `clean`. |
+| `check-subscriptions.sh`    | Verifies `+=` signal subscriptions are undone in a matching lifecycle method. Run by `lint`.               |
+| `Makefile`                  | `restore` / `lint` / `fix` / `format` / `lint-sarif` / `check-signals` / `check-subscriptions` / `dead-code` / `ignore` / `clean`. |
 | `.config/dotnet-tools.json` | Pinned CSharpier and Roslynator CLI versions.                                                              |
 
-All six are project-agnostic. The `Makefile` discovers the solution itself - `*.sln`, then `*.slnx`, then `*.csproj` - so nothing needs renaming per project.
+All seven are project-agnostic. The `Makefile` discovers the solution itself - `*.sln`, then `*.slnx`, then `*.csproj` - so nothing needs renaming per project.
 
 ## Install
 
@@ -49,11 +50,12 @@ make lint
 | Target          | Does                                                                                           |
 | --------------- | ---------------------------------------------------------------------------------------------- |
 | `restore`       | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                              |
-| `lint`          | The gate. Signal check, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
+| `lint`          | The gate. Signal + subscription checks, CSharpier check, then a rebuild per configuration with `-warnaserror`. |
 | `fix`           | `dotnet format style` → `analyzers` → `csharpier format`.                                      |
 | `format`        | CSharpier only.                                                                                |
 | `lint-sarif`    | Same build as `lint`, emitting `lint.sarif` instead of failing.                                |
 | `check-signals` | Scene signal connections that point at methods which do not exist.                             |
+| `check-subscriptions` | `+=` subscriptions that are never undone, or undone in the wrong lifecycle method.       |
 | `dead-code`     | Reports unreferenced public/internal symbols. Advisory - read the caveats.                     |
 | `ignore`        | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                   |
 | `clean`         | `dotnet clean`.                                                                                |
@@ -112,6 +114,27 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   That list stays project-local on purpose -
   a dictionary of Godot's own methods would need re-syncing with every engine release
   to handle something that comes up once or twice per project.
+
+- **`lint` checks signal subscriptions against the node lifecycle, not for `+=`/`-=` symmetry.**
+  Plain symmetry would be noise: subscribing to a child node needs no unsubscribe,
+  because the child is freed with its parent and the connection goes with it.
+  Flagging those buries the findings that matter. Three things are reported instead.
+
+  Subscribing in `_Ready` while unsubscribing in `_ExitTree` is the sharp one, and it looks correct.
+  `_Ready` runs once per node; `_ExitTree` runs on every removal. Verified on Godot 4.7.1:
+
+  ```
+  add     -> _enter_tree, _ready
+  remove  -> _exit_tree
+  re-add  -> _enter_tree            (no _ready)
+  ```
+
+  So after a remove and re-add the handler is gone permanently, the signal fires into nothing, and no error is raised.
+  Subscribe in `_EnterTree` when you unsubscribe in `_ExitTree`.
+
+  The other two are a subscription to an autoload with no unsubscribe anywhere -
+  the autoload outlives the node and keeps holding the handler, with autoload names read from `project.godot` -
+  and a lambda or `Callable.From` handler, which has no reference to hand back to `-=` at all.
 
 - **`<Nullable>enable</Nullable>`, with `CS8618` suppressed - not `annotations`.**
   Godot assigns node references in `_Ready()`, not in the constructor,

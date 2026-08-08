@@ -132,6 +132,7 @@ copy_one "Directory.Build.props"
 copy_one ".editorconfig"
 copy_one ".csharpierignore"
 copy_one "check-signals.sh"
+copy_one "check-subscriptions.sh"
 copy_one ".config/dotnet-tools.json"
 merge_gitignore
 
