@@ -31,6 +31,11 @@ A Godot C# project fails in ways the compiler cannot see, and the obvious analyz
   Every RCS rule ships at `note` - below the threshold the gate enforces, and below what `dotnet format` repairs.
   Both are raised here.
 
+- **Nothing tells you a script is still `public`.**
+  `CA1515` exists for exactly that and is disabled for libraries, which is how Godot builds a game;
+  `CA1051` only covers fields, so a public class with public properties passes clean.
+  `CA1050` is pressed into service here - read it as "still public", not as "add a namespace".
+
 - **Two analyzer rules fire on code Godot demands.**
   `CA1711` rejects the `EventHandler` suffix that `[Signal]` delegates cannot compile without,
   and `CA2007` asks for `ConfigureAwait(false)`, which moves scene-tree access off the main thread.
@@ -110,18 +115,18 @@ make lint
 
 ## Targets
 
-| Target                | Does                                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `restore`             | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                                              |
+| Target                | Does                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `restore`             | `dotnet tool restore` + `dotnet restore`. Run once after cloning.                                                                             |
 | `lint`                | The gate. Signal + subscription checks, CSharpier check, a rebuild per configuration with `-warnaserror`. Every stage runs; fails at the end. |
-| `fix`                 | `dotnet format style` → `analyzers` → `csharpier format`.                                                      |
-| `format`              | CSharpier only.                                                                                                |
-| `lint-sarif`          | Same build as `lint`, emitting `lint.sarif` instead of failing.                                                |
-| `check-signals`       | Scene signal connections that point at methods which do not exist.                                             |
-| `check-subscriptions` | `+=` subscriptions that are never undone, or undone in the wrong lifecycle method.                             |
-| `dead-code`           | Reports unreferenced public/internal symbols. Advisory - read the caveats.                                     |
-| `ignore`              | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                                   |
-| `clean`               | `dotnet clean`.                                                                                                |
+| `fix`                 | `dotnet format style` → `analyzers` → `csharpier format`.                                                                                     |
+| `format`              | CSharpier only.                                                                                                                               |
+| `lint-sarif`          | Same build as `lint`, emitting `lint.sarif` instead of failing.                                                                               |
+| `check-signals`       | Scene signal connections that point at methods which do not exist.                                                                            |
+| `check-subscriptions` | `+=` subscriptions that are never undone, or undone in the wrong lifecycle method.                                                            |
+| `dead-code`           | Reports unreferenced public/internal symbols. Advisory - read the caveats.                                                                    |
+| `ignore`              | One-time. Merges `lint.sarif` into `.gitignore`. Idempotent.                                                                                  |
+| `clean`               | `dotnet clean`.                                                                                                                               |
 
 ### Variables
 
@@ -207,7 +212,7 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   and a lambda or `Callable.From` handler, which has no reference to hand back to `-=` at all.
 
 - **Meziantou is added alongside Roslynator, not instead of it.**
-  Measured on a real project, the two reported 12 and 20 findings with *zero* overlapping locations,
+  Measured on a real project, the two reported 12 and 20 findings with _zero_ overlapping locations,
   and they differ in kind: Roslynator does micro-refactoring that `make fix` mostly applies by itself,
   Meziantou does correctness.
   Two of its rules are switched off, or it would undo decisions made elsewhere:
@@ -267,15 +272,18 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   so making your scripts `internal` clears it without a suppression, and is the fix worth taking -
   on a real project that single change removed 14 findings.
 
-- **`CA1050` and `RCS1110` are off; `CA1051` carries the visibility rule instead.**
-  Both namespace rules fire on correct Godot code - the engine's script template emits no namespace -
-  and what they ask for, wrapping scene scripts in one, is not what Godot does.
-  They are two lines rather than one because `CA1050` covers public types only
-  while `RCS1110` fires at any visibility, so `internal` does not clear it;
-  node scripts escape `RCS1110` for free, since the generators emit partial declarations
-  and the rule skips types with generated parts.
-  `CA1051` stays on and is meant to be suppressed case by case -
-  see [`[Export]` on a public script starts red](#export-on-a-public-script-starts-red).
+- **`CA1050` is on to catch public types; `RCS1110` and `MA0047` are off.**
+  Despite the shared title, they are not the same rule.
+  `CA1050` fires on externally visible types only, and Godot code has no namespaces at all,
+  so its firing set is exactly the set of public types - the thing actually worth knowing about.
+  Its message is the wrong instruction here: **the fix is `internal`, not a namespace.**
+  `RCS1110` and `MA0047` fire at any visibility, so `internal` does not clear them
+  and the only escape is a real namespace; both are off.
+  `CA1515`, the rule that says the right words ("types can be made internal"), is unavailable -
+  it applies only to assemblies that are applications, and Godot builds the game as a library
+  so the engine can load it dynamically.
+  Do not expect `CA1051` to cover this: it is about visible _fields_,
+  so a public class exposing public _properties_ passes it cleanly.
 
 - **The bundle ships no `.gitignore`, and merges instead of copying.**
   Godot writes `.gitignore` itself when a project is created with Git version-control metadata:
@@ -315,11 +323,34 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   `*.tscn`, `*.tres`, `*.godot` and `*.import` get `trim_trailing_whitespace = false` and `insert_final_newline = false`,
   because Godot owns their exact bytes and editing them produces spurious diffs.
 
-## `[Export]` on a public script starts red
+## Scripts from the Godot editor start red
 
 This one is deliberate, so it is worth knowing before it happens rather than after.
+Godot's "new C# script" template emits a public class with no namespace,
+so a brand-new script trips `CA1050` before it contains a line of your code:
 
-Godot's "new C# script" template emits a public class, and the documented way to expose a value is a public field:
+```csharp
+public partial class Player : Node { }     // CA1050
+```
+
+**Ignore what the message says.** It reads _"Declare types in namespaces"_, and that is the wrong
+instruction in a Godot project - the fix is `internal`:
+
+```csharp
+internal sealed partial class Player : Node { }
+```
+
+The rule is kept because it is the only one left that notices a public type,
+and on a project that already follows the convention it is near-silent:
+seven internal types and one public produced exactly one finding, on the class that had just been widened by hand.
+`CA1515` would say the right words, but it only applies to applications,
+and Godot builds the game as a library.
+`RCS1110` and `MA0047` are off, because they demand namespaces at any visibility.
+
+If a type genuinely has to stay public, suppress it in place with the reason recorded -
+the same three mechanisms as below work, with `CA1050` in place of `CA1051`.
+
+Adding an exported field brings in a second rule:
 
 ```csharp
 public partial class Player : Node
@@ -331,11 +362,11 @@ public partial class Player : Node
 
 `CA1051` fires on that combination. It needs both halves to be externally visible, which makes it precise:
 
-| class | field | fires |
-| ---------- | ---------- | ------- |
-| `public` | `public` | `CA1051` |
-| `public` | `internal` | silent |
-| `internal` | `public` | silent |
+| class      | field      | fires    |
+| ---------- | ---------- | -------- |
+| `public`   | `public`   | `CA1051` |
+| `public`   | `internal` | silent   |
+| `internal` | `public`   | silent   |
 
 So a freshly created empty script stays quiet, and the rule speaks up the moment you add an exported field -
 which is the point at which the visibility question is worth asking.
@@ -370,10 +401,10 @@ public float Speed = 1f;
 `#pragma warning disable CA1051` around a region works too, and
 `GlobalSuppressions.cs` with `[assembly: SuppressMessage(..., Scope = "member", Target = "~F:Player.Speed")]`
 keeps the list in one place if you accumulate several -
-Rider and Visual Studio generate that form through *Suppress → in Suppression File*.
+Rider and Visual Studio generate that form through _Suppress → in Suppression File_.
 All three were checked; there is no `// nolint`-style comment in C#, since Roslyn does not read comments.
 
-`CA1050` and `RCS1110`, which demand namespaces, are off - see [Design decisions](#design-decisions).
+Both rules key off _external visibility_, which is why `internal` clears them at the source.
 
 ## Tip: `internal` classes, `private` members
 

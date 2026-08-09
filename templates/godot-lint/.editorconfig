@@ -78,26 +78,35 @@ dotnet_analyzer_diagnostic.category-roslynator.severity = warning
 # underscore is required by Godot, not a naming slip.
 # dotnet_diagnostic.CA1707.severity = none
 
-# Namespaces. CA1050 and RCS1110 ask for the same thing, and neither is worth
-# obeying here, so both are off.
+# Namespaces. CA1050 is ON, RCS1110 is OFF, and the reason is not what their
+# shared title suggests.
 #
-# Godot's "new C# script" templates emit `public partial class X : Y` with no
-# namespace, so a script trips these before it contains a line of your code, and
-# the answer they want - wrap scene scripts in a namespace - is not what Godot
-# does. Namespaces work fine (the generators emit ScriptPathAttribute inside
-# them correctly) and suit shared utility code; adopting them because an
-# analyzer asked is the tail wagging the dog.
+# READ THIS BEFORE OBEYING CA1050: in a Godot project the fix is `internal`, not
+# a namespace. The message says "Declare types in namespaces" and that is the
+# wrong instruction here - wrapping scene scripts in a namespace to satisfy an
+# analyzer is the tail wagging the dog. Namespaces do work (the generators emit
+# ScriptPathAttribute inside them correctly) and suit shared utility code.
 #
-# Two lines because they land on different code, so one does not cover the other:
+# CA1050 is kept because it is the only rule left that notices a public type.
+# It fires on externally visible types only, and Godot code has no namespaces at
+# all, so its firing set is exactly the set of public types - which is the thing
+# worth knowing about. Measured on a real project mid-review: it reported one
+# finding, and that finding was a class someone had just widened to public by
+# hand. Confirm the difference for yourself:
 #
-#   CA1050  - public types only.
-#   RCS1110 - any visibility, so `internal` does not clear it. Node scripts are
-#             exempt for free: the generators emit partial declarations and the
-#             rule skips types with generated parts, which leaves plain helper
-#             classes.
+#   public class    -> CA1050, MA0047
+#   internal class  -> nothing             (MA0047 still fires - see below)
 #
-# Visibility is still enforced, by CA1051 below - that rule stays on.
-dotnet_diagnostic.CA1050.severity = none
+# The rule that says the right words is CA1515, "types can be made internal".
+# It is unavailable here: it only applies to assemblies that are applications,
+# and Godot builds the game as OutputType=Library so the engine can load it
+# dynamically.
+#
+# RCS1110 stays OFF because it is genuinely a namespace rule: it fires at any
+# visibility, so `internal` does not clear it and the only way out is a real
+# namespace. Node scripts escape it for free, since the generators emit partial
+# declarations and the rule skips types with generated parts, which leaves plain
+# helper classes. MA0047 behaves the same way and is switched off with it.
 dotnet_diagnostic.RCS1110.severity = none
 
 # CA1051 is ON, and this suppression is left commented on purpose - it is the
