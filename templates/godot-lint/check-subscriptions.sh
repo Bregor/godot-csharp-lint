@@ -7,32 +7,36 @@
 #
 # Three things are reported, all verified against Godot 4.7.1:
 #
-# 1. Subscribed in _Ready, unsubscribed in _ExitTree, with no RequestReady().
+# 1. Subscribed in _Ready, unsubscribed in _ExitTree.
 #
-#    _Ready runs once per node, _ExitTree runs on every removal from the tree.
-#    So remove a node and add it back and the pair does not balance: _ExitTree
-#    unsubscribed, _Ready never runs again, the handler is gone for good. The
-#    signal keeps firing into nothing, with no error. Confirmed on the engine:
+#    _Ready runs once per node, _ExitTree runs on every removal from the tree,
+#    so the pair does not balance. Confirmed on the engine:
 #
 #      add    -> parent _enter_tree, child _enter_tree, child _ready, parent _ready
 #      remove -> child _exit_tree, parent _exit_tree
 #      re-add -> parent _enter_tree, child _enter_tree          (no _ready)
 #
-#    There are two ways out and this check accepts either.
+#    What to do about it depends on the target, and the two cases are opposite,
+#    so the check reports them differently rather than prescribing one fix.
 #
-#    RequestReady() in _ExitTree re-arms _Ready for the next entry. It is what
-#    the engine provides for exactly this, so a file that calls it anywhere is
-#    not reported. Worth knowing that it applies to the node it is called on
-#    and does not cascade: in the same run only the parent's _ready fired
-#    again, the child's did not.
+#    Target is an autoload: the unsubscribe is required, because the singleton
+#    outlives the node and would keep holding the handler. So the subscription
+#    is the half in the wrong place - _EnterTree runs on every entry and pairs
+#    with _ExitTree.
 #
-#    Subscribing in _EnterTree works too, since that runs on every entry, but
-#    it is not the automatic answer. _enter_tree is top-down, so when a
-#    parent's runs, its children's have not, and their is_inside_tree() is
-#    still false. GetNode does resolve there - the child already exists as a
-#    child - but anything that needs the child to actually be in the tree does
-#    not belong in _EnterTree, and a child added at runtime after the parent
-#    entered will not be found at all.
+#    Target is anything else - typically a child node: the unsubscribe is the
+#    redundant half, and it is what breaks things. A connection lives on the
+#    objects rather than on the tree, so it survives removal and re-adding;
+#    measured, a parent removed and re-added still received its child timer's
+#    signal, with the connection reported alive. The child is freed together
+#    with the parent anyway. So that -= line runs on every removal, destroys a
+#    subscription that would have survived, and _Ready never runs again to
+#    restore it. Deleting the line is usually the fix.
+#
+#    RequestReady() is deliberately not part of this. It re-arms _Ready for the
+#    next entry and would silence the finding, but it re-runs the whole method,
+#    which is a re-initialisation decision that belongs to the author and not
+#    to a linter.
 #
 # 2. Subscribed to an autoload with no unsubscribe anywhere in the file.
 #
@@ -134,26 +138,35 @@ report() {
 	printf '%s\n' "$1"
 }
 
-# --- 1. _Ready subscribes, _ExitTree unsubscribes, no RequestReady --------
+# --- 1. _Ready subscribes, _ExitTree unsubscribes -------------------------
 while IFS='|' read -r file line method op left rhs; do
 	[ "$op" = "+" ] || continue
 	[ "$method" = "_Ready" ] || continue
 
-	# RequestReady() re-arms _Ready for the next entry into the tree, which is
-	# the engine's own answer for a node that leaves and comes back. A file
-	# that calls it has dealt with re-entry deliberately, so leave it alone.
-	if grep -q 'RequestReady[[:space:]]*(' "$file"; then
-		continue
-	fi
+	grep -q "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events" || continue
+	unsub=$(grep "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events" | cut -d'|' -f2 | head -1)
 
-	if grep -q "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events"; then
-		unsub=$(grep "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events" | cut -d'|' -f2 | head -1)
-		report "  ${file#"$ROOT"/}:${line}: '${left} += ${rhs}' in _Ready, but '-=' is in _ExitTree (line ${unsub}).
-    _Ready runs once, _ExitTree runs on every removal - after a remove and
-    re-add the subscription is gone for good. Either call RequestReady() in
-    _ExitTree to re-arm _Ready, or move the subscription to _EnterTree."
-		echo
+	root=${left%%.*}
+
+	if [ -s "$WORK/autoloads" ] && grep -qx "$root" "$WORK/autoloads"; then
+		# The unsubscribe is forced, so the subscription is the half that has to
+		# move. Nothing is being guessed here: an autoload outlives the node.
+		report "  ${file#"$ROOT"/}:${line}: '${left} += ${rhs}' in _Ready, '-=' in _ExitTree (line ${unsub}).
+    '${root}' is an autoload, so the unsubscribe is required - it outlives this
+    node and would keep holding the handler. But _Ready runs once and _ExitTree
+    runs on every removal, so after a remove and re-add nothing re-subscribes.
+    _EnterTree runs on every entry and pairs with _ExitTree."
+	else
+		# Here the unsubscribe is the redundant half, and pointing at the line to
+		# delete beats prescribing where the subscription should live.
+		report "  ${file#"$ROOT"/}:${unsub}: '${left} -= ${rhs}' in _ExitTree undoes a subscription that did not need undoing.
+    A connection lives on the objects, not on the tree, so it survives being
+    removed and re-added; '${root}' is not an autoload, so it is freed together
+    with this node anyway. That line runs on every removal while the '+=' on
+    line ${line} runs once, so it destroys a subscription that would otherwise
+    have survived. Deleting it is usually the fix."
 	fi
+	echo
 done <"$WORK/events"
 
 # --- 2. autoload subscription never undone --------------------------------
