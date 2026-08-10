@@ -7,18 +7,32 @@
 #
 # Three things are reported, all verified against Godot 4.7.1:
 #
-# 1. Subscribed in _Ready, unsubscribed in _ExitTree.
+# 1. Subscribed in _Ready, unsubscribed in _ExitTree, with no RequestReady().
 #
 #    _Ready runs once per node, _ExitTree runs on every removal from the tree.
 #    So remove a node and add it back and the pair does not balance: _ExitTree
 #    unsubscribed, _Ready never runs again, the handler is gone for good. The
 #    signal keeps firing into nothing, with no error. Confirmed on the engine:
 #
-#      add    -> _enter_tree, _ready
-#      remove -> _exit_tree
-#      re-add -> _enter_tree            (no _ready)
+#      add    -> parent _enter_tree, child _enter_tree, child _ready, parent _ready
+#      remove -> child _exit_tree, parent _exit_tree
+#      re-add -> parent _enter_tree, child _enter_tree          (no _ready)
 #
-#    Subscribe in _EnterTree when you unsubscribe in _ExitTree.
+#    There are two ways out and this check accepts either.
+#
+#    RequestReady() in _ExitTree re-arms _Ready for the next entry. It is what
+#    the engine provides for exactly this, so a file that calls it anywhere is
+#    not reported. Worth knowing that it applies to the node it is called on
+#    and does not cascade: in the same run only the parent's _ready fired
+#    again, the child's did not.
+#
+#    Subscribing in _EnterTree works too, since that runs on every entry, but
+#    it is not the automatic answer. _enter_tree is top-down, so when a
+#    parent's runs, its children's have not, and their is_inside_tree() is
+#    still false. GetNode does resolve there - the child already exists as a
+#    child - but anything that needs the child to actually be in the tree does
+#    not belong in _EnterTree, and a child added at runtime after the parent
+#    entered will not be found at all.
 #
 # 2. Subscribed to an autoload with no unsubscribe anywhere in the file.
 #
@@ -120,16 +134,24 @@ report() {
 	printf '%s\n' "$1"
 }
 
-# --- 1. _Ready subscribes, _ExitTree unsubscribes -------------------------
+# --- 1. _Ready subscribes, _ExitTree unsubscribes, no RequestReady --------
 while IFS='|' read -r file line method op left rhs; do
 	[ "$op" = "+" ] || continue
 	[ "$method" = "_Ready" ] || continue
+
+	# RequestReady() re-arms _Ready for the next entry into the tree, which is
+	# the engine's own answer for a node that leaves and comes back. A file
+	# that calls it has dealt with re-entry deliberately, so leave it alone.
+	if grep -q 'RequestReady[[:space:]]*(' "$file"; then
+		continue
+	fi
 
 	if grep -q "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events"; then
 		unsub=$(grep "^${file}|[0-9]*|_ExitTree|-|${left}|${rhs}$" "$WORK/events" | cut -d'|' -f2 | head -1)
 		report "  ${file#"$ROOT"/}:${line}: '${left} += ${rhs}' in _Ready, but '-=' is in _ExitTree (line ${unsub}).
     _Ready runs once, _ExitTree runs on every removal - after a remove and
-    re-add the subscription is gone for good. Subscribe in _EnterTree instead."
+    re-add the subscription is gone for good. Either call RequestReady() in
+    _ExitTree to re-arm _Ready, or move the subscription to _EnterTree."
 		echo
 	fi
 done <"$WORK/events"

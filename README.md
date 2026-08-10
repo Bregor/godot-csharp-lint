@@ -13,7 +13,8 @@ A Godot C# project fails in ways the compiler cannot see, and the obvious analyz
 - **Subscribing in `_Ready` and unsubscribing in `_ExitTree` looks symmetric.**
   `_Ready` runs once per node, `_ExitTree` on every removal,
   so after a remove and re-add the handler is gone for good and the signal fires into nothing.
-  `lint` reports the mismatched pair, and the subscription to an autoload that is never undone.
+  `lint` reports the mismatched pair unless the file calls `RequestReady()`,
+  and reports a subscription to an autoload that is never undone.
 
 - **Only one of three configurations gets analyzed.**
   Godot generates `Debug`, `ExportDebug` and `ExportRelease`, and a default `dotnet build` compiles the first.
@@ -205,7 +206,17 @@ These are the non-obvious ones, and the reasoning is repeated inline in each fil
   ```
 
   So after a remove and re-add the handler is gone permanently, the signal fires into nothing, and no error is raised.
-  Subscribe in `_EnterTree` when you unsubscribe in `_ExitTree`.
+
+  Two ways out, and the check accepts either.
+  `RequestReady()` in `_ExitTree` re-arms `_Ready` for the next entry - this is what the engine provides for the case,
+  so a file that calls it anywhere is not reported.
+  It applies to the node it is called on and does not cascade:
+  in the same run only the parent's `_Ready` fired again, the child's did not.
+  Subscribing in `_EnterTree` works too, but it is not the automatic answer -
+  `_EnterTree` is top-down, so when a parent's runs its children's have not, and their `IsInsideTree()` is still false.
+  `GetNode` does resolve there, since the child already exists as a child,
+  but anything needing the child to actually be *in* the tree does not belong in `_EnterTree`,
+  and a child added at runtime after the parent entered will not be found at all.
 
   The other two are a subscription to an autoload with no unsubscribe anywhere -
   the autoload outlives the node and keeps holding the handler, with autoload names read from `project.godot` -
